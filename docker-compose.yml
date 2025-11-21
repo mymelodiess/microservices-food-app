@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  user_service:
+    build: ./user_service
+    container_name: user_service
+    ports:
+      - "8001:8001"
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+
+  restaurant_service:
+    build: ./restaurant_service
+    container_name: restaurant_service
+    ports:
+      - "8002:8002"
+    command: uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+
+  order_service:
+    build: ./order_service
+    container_name: order_service
+    ports:
+      - "8003:8003"
+    depends_on:
+      - user_service
+      - restaurant_service
+      - payment_service
+    command: uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+
+  payment_service:
+    build: ./payment_service
+    container_name: payment_service
+    ports:
+      - "8004:8004"
+    command: uvicorn main:app --host 0.0.0.0 --port 8004 --reload
