@@ -7,4 +7,4 @@ class Payment(Base):
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, index=True)
     amount = Column(Float)
-    status = Column(String, default="SUCCESS")
+    status = Column(String(50), default="SUCCESS")

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thực Đơn - Food App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        .food-card { transition: transform 0.2s; cursor: pointer; }
+        .food-card:hover { transform: translateY(-5px); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .cart-badge { position: absolute; top: 5px; right: 5px; font-size: 0.7rem; }
+    </style>
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#">🍔 Micro Food</a>
+            <div class="d-flex align-items-center">
+                
+                <a href="cart.html" class="btn btn-light position-relative me-3">
+                    <i class="bi bi-cart-fill text-primary"></i>
+                    <span id="cart-count" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                        0
+                    </span>
+                </a>
+
+                <button onclick="logout()" class="btn btn-outline-light btn-sm">Đăng xuất</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-5">
+        <h2 class="text-center mb-4">Thực Đơn Hôm Nay</h2>
+        <div id="food-list" class="row g-4">
+            <div class="text-center mt-5"><div class="spinner-border text-primary"></div></div>
+        </div>
+    </div>
+
+    <script>
+        // 1. Kiểm tra đăng nhập
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            alert('Vui lòng đăng nhập trước!');
+            window.location.href = 'login.html';
+        }
+
+        // 2. Load danh sách món khi mở trang
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchFoods();
+            updateCartCount();
+        });
+
+        async function fetchFoods() {
+            try {
+                // Gọi API Lấy tất cả món (Restaurant Service - 8002)
+                const response = await fetch('http://localhost:8002/foods');
+                const foods = await response.json();
+
+                const foodListDiv = document.getElementById('food-list');
+                foodListDiv.innerHTML = ''; // Xóa icon loading
+
+                if (foods.length === 0) {
+                    foodListDiv.innerHTML = '<p class="text-center">Chưa có món ăn nào.</p>';
+                    return;
+                }
+
+                // Vẽ từng món ăn ra màn hình
+                foods.forEach(food => {
+                    const html = `
+                        <div class="col-md-4 col-sm-6">
+                            <div class="card food-card h-100 border-0 shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <h5 class="card-title fw-bold">${food.name}</h5>
+                                        <span class="badge bg-success">${formatMoney(food.price)}</span>
+                                    </div>
+                                    <p class="card-text text-muted small">Người bán: ID ${food.owner_id}</p>
+                                    <button onclick="addToCart(${food.id}, '${food.name}', ${food.price})" 
+                                            class="btn btn-primary w-100 mt-3">
+                                        <i class="bi bi-plus-circle"></i> Thêm vào giỏ
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    foodListDiv.innerHTML += html;
+                });
+
+            } catch (error) {
+                console.error(error);
+                alert('Lỗi kết nối đến Server 8002. Bạn đã bật Restaurant Service chưa?');
+            }
+        }
+
+        // 3. Hàm Thêm vào giỏ hàng (Lưu LocalStorage)
+        function addToCart(id, name, price) {
+            // Lấy giỏ hàng cũ ra (nếu chưa có thì tạo mảng rỗng)
+            let cart = JSON.parse(localStorage.getItem('cart')) || [];
+
+            // Kiểm tra món đã có trong giỏ chưa
+            const existingItem = cart.find(item => item.food_id === id);
+
+            if (existingItem) {
+                existingItem.quantity += 1; // Có rồi thì tăng số lượng
+            } else {
+                // Chưa có thì thêm mới
+                cart.push({ food_id: id, name: name, price: price, quantity: 1 });
+            }
+
+            // Lưu ngược lại vào LocalStorage
+            localStorage.setItem('cart', JSON.stringify(cart));
+            
+            updateCartCount();
+            alert(`Đã thêm "${name}" vào giỏ!`);
+        }
+
+        // Cập nhật số lượng trên icon giỏ hàng
+        function updateCartCount() {
+            const cart = JSON.parse(localStorage.getItem('cart')) || [];
+            const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+            document.getElementById('cart-count').textContent = totalItems;
+        }
+
+        // Hàm định dạng tiền Việt Nam
+        function formatMoney(amount) {
+            return amount.toLocaleString('vi-VN', { style: 'currency', currency: 'VND' });
+        }
+
+        function logout() {
+            localStorage.clear();
+            window.location.href = 'login.html';
+        }
+    </script>
+</body>
+</html>

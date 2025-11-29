@@ -5,5 +5,6 @@ class Food(Base):
     __tablename__ = "foods"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
+    name = Column(String(255), index=True)
     price = Column(Float)
+    owner_id = Column(Integer, index=True)

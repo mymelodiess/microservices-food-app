@@ -6,11 +6,10 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_name = Column(String)
+    user_name = Column(String(255))
     total_price = Column(Float)
-    status = Column(String, default="PENDING")
+    status = Column(String(50), default="PENDING")
     
-    # Quan hệ 1-N: Một đơn hàng có nhiều món
     items = relationship("OrderItem", back_populates="order")
 
 class OrderItem(Base):
@@ -18,7 +17,7 @@ class OrderItem(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"))
-    food_name = Column(String)
+    food_name = Column(String(255))
     quantity = Column(Integer)
     unit_price = Column(Float)
     subtotal = Column(Float)

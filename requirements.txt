@@ -1,0 +1,23 @@
+# --- Framework & Server ---
+fastapi
+uvicorn
+httpx
+pydantic
+
+# --- Database (MySQL) ---
+sqlalchemy
+pymysql
+cryptography
+
+# --- Bảo mật (Auth & Token) ---
+passlib[bcrypt]
+bcrypt==4.0.1
+python-jose[cryptography]
+python-multipart
+
+# --- Giao diện (Frontend Python) ---
+streamlit
+pandas
+
+# --- Tool Test (Load Testing) ---
+locust
