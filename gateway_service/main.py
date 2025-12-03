@@ -20,26 +20,27 @@ ORDER_SERVICE = "http://order_service:8003"
 CART_SERVICE = "http://cart_service:8005"
 
 # --- HÀM CHUYỂN TIẾP REQUEST (PROXY) ---
+# gateway_service/main.py
+
 async def forward_request(service_url: str, path: str, request: Request):
     client = httpx.AsyncClient()
     
-    # 1. Xây dựng URL đích
-    # Ví dụ: http://user_service:8001/login
     target_url = f"{service_url}/{path}"
     
-    # 2. Lấy dữ liệu từ request gốc
     params = dict(request.query_params)
     try:
         body = await request.json()
     except:
-        body = None # Trường hợp GET không có body
-        
-    # 3. Chuyển tiếp Headers (Quan trọng để giữ Token)
-    # Loại bỏ 'host' để tránh lỗi xung đột
-    headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+        body = None 
+
+    # --- SỬA QUAN TRỌNG TẠI ĐÂY ---
+    # Loại bỏ 'host' VÀ 'content-length' để Gateway tự tính toán lại độ dài gói tin
+    headers = {
+        k: v for k, v in request.headers.items() 
+        if k.lower() not in ['host', 'content-length']
+    }
 
     try:
-        # 4. Gửi request sang Service con
         resp = await client.request(
             method=request.method,
             url=target_url,
@@ -49,7 +50,6 @@ async def forward_request(service_url: str, path: str, request: Request):
             timeout=10.0
         )
         
-        # 5. Trả kết quả về cho Frontend
         return Response(
             content=resp.content,
             status_code=resp.status_code,
@@ -70,8 +70,9 @@ async def gateway_router(path: str, request: Request):
     if path in ["login", "register"] or path.startswith("users"):
         return await forward_request(USER_SERVICE, path, request)
     
-    # 2. Nhóm RESTAURANT (Món ăn)
-    elif path.startswith("foods") or path.startswith("seller"):
+    # 2. Nhóm RESTAURANT (Món ăn & Chi nhánh)
+    # --- THÊM: or path.startswith("branches") ---
+    elif path.startswith("foods") or path.startswith("seller") or path.startswith("branches"):
         return await forward_request(RESTAURANT_SERVICE, path, request)
     
     # 3. Nhóm ORDER (Đơn hàng)
