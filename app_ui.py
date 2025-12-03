@@ -144,33 +144,56 @@ if st.session_state['token']:
                         else: st.error(f"Lỗi: {res.text}")
                     except Exception as e: st.error(f"Lỗi kết nối: {e}")
 
+        # --- TÌM TAB THỰC ĐƠN VÀ THAY THẾ BẰNG CODE DƯỚI ĐÂY ---
         with tab_my_foods:
             try:
-                # --- SỬA LẠI ĐOẠN NÀY ---
-                # Thay vì gọi /seller/foods (API cũ không còn tồn tại)
-                # Chúng ta gọi API /foods và lọc theo ID chi nhánh hiện tại của Seller
-                current_branch = st.session_state['branch_id']
-                
-                res = httpx.get(f"{RESTAURANT_URL}/foods", params={"branch_id": current_branch})
+                # Lấy danh sách món của chi nhánh hiện tại
+                res = httpx.get(f"{RESTAURANT_URL}/foods", params={"branch_id": st.session_state['branch_id']})
                 
                 if res.status_code == 200:
                     my_foods = res.json()
-                    if my_foods: 
-                        # Hiển thị bảng danh sách món
-                        st.table([
-                            {
-                                "ID": f['id'], 
-                                "Tên món": f['name'], 
-                                "Giá bán": f"{f['price']:,} đ"
-                            } for f in my_foods
-                        ])
-                    else: 
-                        st.info("Chi nhánh của bạn chưa có món nào. Hãy qua tab 'Thêm Món' để tạo nhé!")
-                else:
-                    st.error(f"Lỗi server: {res.text}")
                     
-            except Exception as e: 
-                st.error(f"Không thể kết nối Server: {e}")
+                    if my_foods:
+                        st.success(f"Chi nhánh đang có {len(my_foods)} món")
+                        
+                        # Tạo tiêu đề bảng
+                        h1, h2, h3 = st.columns([3, 1, 1])
+                        h1.markdown("**Tên món**")
+                        h2.markdown("**Giá bán**")
+                        h3.markdown("**Hành động**")
+                        st.divider()
+                        
+                        # Duyệt qua từng món để hiển thị
+                        for f in my_foods:
+                            c1, c2, c3 = st.columns([3, 1, 1])
+                            
+                            # Cột 1: Tên + Ảnh (nếu muốn)
+                            c1.write(f"🍛 {f['name']}")
+                            
+                            # Cột 2: Giá
+                            c2.write(f"{f['price']:,} đ")
+                            
+                            # Cột 3: Nút Xóa
+                            # Key=... để Streamlit phân biệt nút của các món khác nhau
+                            if c3.button("🗑️ Xóa", key=f"del_{f['id']}"):
+                                with st.spinner("Đang xóa..."):
+                                    # Gọi API DELETE
+                                    del_res = httpx.delete(f"{RESTAURANT_URL}/foods/{f['id']}", headers=headers)
+                                    
+                                    if del_res.status_code == 200:
+                                        st.success("Đã xóa!")
+                                        time.sleep(0.5) # Đợi xíu cho đẹp
+                                        st.rerun()      # Tải lại trang
+                                    else:
+                                        st.error(f"Lỗi: {del_res.json().get('detail')}")
+                            
+                            st.divider() # Kẻ đường gạch ngang ngăn cách
+                    else:
+                        st.info("Chi nhánh chưa có món nào. Hãy thêm món mới!")
+                else:
+                    st.error("Lỗi kết nối Server")
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
 
         with tab_manage_orders:
             st.subheader("Đơn hàng cần xử lý")

@@ -149,3 +149,30 @@ def get_food_detail(food_id: int, db: Session = Depends(get_db)):
     if not food:
         raise HTTPException(status_code=404, detail="Food not found")
     return food
+
+# --- THÊM VÀO CUỐI FILE restaurant_service/main.py ---
+
+@app.delete("/foods/{food_id}")
+def delete_food(
+    food_id: int, 
+    db: Session = Depends(get_db),
+    # Hàm verify_seller này bạn đã có ở phần trên file main.py rồi
+    token_payload: dict = Depends(verify_seller) 
+):
+    # 1. Tìm món ăn trong DB
+    food = db.query(models.Food).filter(models.Food.id == food_id).first()
+    if not food:
+        raise HTTPException(status_code=404, detail="Món ăn không tồn tại")
+    
+    # 2. KIỂM TRA QUYỀN (Quan trọng)
+    # Lấy ID chi nhánh của Seller từ Token
+    seller_branch_id = token_payload.get("branch_id")
+    
+    # So sánh: Nếu món này KHÔNG thuộc chi nhánh của Seller -> Chặn
+    if food.branch_id != seller_branch_id:
+         raise HTTPException(status_code=403, detail="Bạn chỉ được xóa món thuộc chi nhánh của mình!")
+
+    # 3. Xóa
+    db.delete(food)
+    db.commit()
+    return {"message": "Đã xóa món ăn thành công"}
