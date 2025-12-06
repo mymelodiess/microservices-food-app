@@ -1,33 +1,13 @@
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.security import APIKeyHeader
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import httpx
+from fastapi import FastAPI, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from jose import jwt, JWTError
-from typing import List
-
+from database import SessionLocal, engine, Base
 import models
-from database import SessionLocal, engine
 
-# --- CẤU HÌNH BẢO MẬT ---
-SECRET_KEY = "chuoi_bi_mat_sieu_kho_doan_cua_ban"
-ALGORITHM = "HS256"
-
-# Tạo bảng trong DB
-models.Base.metadata.create_all(bind=engine)
+# Tạo lại bảng
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
-
-# --- CẤU HÌNH CORS ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-oauth2_scheme = APIKeyHeader(name="Authorization")
 
 def get_db():
     db = SessionLocal()
@@ -36,82 +16,90 @@ def get_db():
     finally:
         db.close()
 
-# --- HÀM LẤY USER ID TỪ TOKEN ---
-def get_current_user_id(token: str = Depends(oauth2_scheme)):
+# --- AUTH HELPER ---
+async def get_user_id(request: Request):
+    token = request.headers.get("Authorization")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Token")
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Token thiếu ID")
-        return user_id
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token không hợp lệ")
+        # Gọi User Service xác thực (qua Gateway hoặc trực tiếp)
+        async with httpx.AsyncClient() as client:
+            res = await client.get("http://user_service:8001/verify", headers={"Authorization": token})
+            if res.status_code != 200:
+                raise HTTPException(status_code=401, detail="Invalid Token")
+            return res.json()['id']
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
 
-# --- SCHEMAS ---
-class CartAdd(BaseModel):
-    food_id: int
-    quantity: int = 1
+# ==========================================
+# API GIỎ HÀNG THÔNG MINH
+# ==========================================
 
-class CartUpdate(BaseModel):
-    food_id: int
-    quantity: int
-
-class CartResponse(BaseModel):
-    food_id: int
-    quantity: int
-    class Config:
-        from_attributes = True
-
-# --- API ENDPOINTS ---
-
-# 1. Thêm vào giỏ (Cộng dồn nếu đã có)
 @app.post("/cart")
-def add_to_cart(item: CartAdd, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
-    existing_item = db.query(models.CartItem).filter(
-        models.CartItem.user_id == user_id,
-        models.CartItem.food_id == item.food_id
-    ).first()
+async def add_to_cart(item: dict, request: Request, db: Session = Depends(get_db)):
+    user_id = await get_user_id(request)
+    
+    # Nhận dữ liệu từ UI
+    f_id = item.get('food_id')
+    qty = item.get('quantity', 1)
+    b_id = item.get('branch_id') # UI bắt buộc phải gửi cái này
+    
+    if not b_id:
+        raise HTTPException(status_code=400, detail="Missing branch_id")
 
-    if existing_item:
-        existing_item.quantity += item.quantity
+    # 1. Kiểm tra giỏ hàng hiện tại
+    existing_items = db.query(models.CartItem).filter(models.CartItem.user_id == user_id).all()
+    
+    if existing_items:
+        # Lấy branch_id của món đầu tiên trong giỏ
+        current_branch = existing_items[0].branch_id
+        
+        # Nếu khác branch -> Báo lỗi ngay
+        if current_branch != b_id:
+             raise HTTPException(status_code=409, detail=f"Giỏ hàng đang chứa món của quán khác. Vui lòng xóa giỏ hàng cũ trước!")
+            
+        # Nếu cùng branch -> Cộng dồn số lượng nếu trùng món
+        found = False
+        for cart_item in existing_items:
+            if cart_item.food_id == f_id:
+                cart_item.quantity += qty
+                found = True
+                break
+        
+        if not found:
+            new_item = models.CartItem(user_id=user_id, food_id=f_id, quantity=qty, branch_id=b_id)
+            db.add(new_item)
+            
     else:
-        new_item = models.CartItem(user_id=user_id, food_id=item.food_id, quantity=item.quantity)
+        # Giỏ trống -> Thêm mới
+        new_item = models.CartItem(user_id=user_id, food_id=f_id, quantity=qty, branch_id=b_id)
         db.add(new_item)
-    
-    db.commit()
-    return {"message": "Đã thêm vào giỏ"}
 
-# 2. Cập nhật số lượng (MỚI)
+    db.commit()
+    return {"message": "Added"}
+
+@app.get("/cart")
+async def get_my_cart(request: Request, db: Session = Depends(get_db)):
+    user_id = await get_user_id(request)
+    return db.query(models.CartItem).filter(models.CartItem.user_id == user_id).all()
+
 @app.put("/cart")
-def update_cart_item(item: CartUpdate, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
-    existing_item = db.query(models.CartItem).filter(
-        models.CartItem.user_id == user_id,
-        models.CartItem.food_id == item.food_id
-    ).first()
-
-    if not existing_item:
-        raise HTTPException(status_code=404, detail="Món ăn không có trong giỏ")
-
-    if item.quantity <= 0:
-        # Nếu số lượng <= 0 thì xóa luôn
-        db.delete(existing_item)
-        msg = "Đã xóa món khỏi giỏ"
-    else:
-        existing_item.quantity = item.quantity
-        msg = "Đã cập nhật số lượng"
+async def update_cart(item: dict, request: Request, db: Session = Depends(get_db)):
+    user_id = await get_user_id(request)
+    f_id = item.get('food_id')
+    qty = item.get('quantity')
     
-    db.commit()
-    return {"message": msg}
+    cart_item = db.query(models.CartItem).filter(models.CartItem.user_id == user_id, models.CartItem.food_id == f_id).first()
+    if cart_item:
+        if qty <= 0: db.delete(cart_item)
+        else: cart_item.quantity = qty
+        db.commit()
+        return {"message": "Updated"}
+    raise HTTPException(status_code=404, detail="Item not found")
 
-# 3. Xem giỏ hàng
-@app.get("/cart", response_model=List[CartResponse])
-def get_cart(db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
-    items = db.query(models.CartItem).filter(models.CartItem.user_id == user_id).all()
-    return items
-
-# 4. Xóa sạch giỏ hàng
 @app.delete("/cart")
-def clear_cart(db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+async def clear_cart(request: Request, db: Session = Depends(get_db)):
+    user_id = await get_user_id(request)
     db.query(models.CartItem).filter(models.CartItem.user_id == user_id).delete()
     db.commit()
-    return {"message": "Đã xóa giỏ hàng"}
+    return {"message": "Cleared"}

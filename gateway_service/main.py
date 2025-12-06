@@ -1,87 +1,129 @@
+import os
 import httpx
-from fastapi import FastAPI, Request, HTTPException, Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, Response
 
-app = FastAPI()
+app = FastAPI(title="API Gateway")
 
-# --- CẤU HÌNH CORS (Để Frontend gọi được) ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ==================================================================
+# 1. ĐỌC CẤU HÌNH TỪ BIẾN MÔI TRƯỜNG (.ENV)
+# ==================================================================
+# Nếu không tìm thấy trong .env, sẽ dùng giá trị mặc định (tham số thứ 2)
+USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "http://user_service:8001")
+RESTAURANT_SERVICE_URL = os.getenv("RESTAURANT_SERVICE_URL", "http://restaurant_service:8002")
+ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://order_service:8003")
+PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "http://payment_service:8004")
+CART_SERVICE_URL = os.getenv("CART_SERVICE_URL", "http://cart_service:8005")
 
-# --- ĐỊNH NGHĨA ĐỊA CHỈ CÁC SERVICE CON (Trong mạng Docker) ---
-USER_SERVICE = "http://user_service:8001"
-RESTAURANT_SERVICE = "http://restaurant_service:8002"
-ORDER_SERVICE = "http://order_service:8003"
-CART_SERVICE = "http://cart_service:8005"
-
-# --- HÀM CHUYỂN TIẾP REQUEST (PROXY) ---
-# gateway_service/main.py
-
+# ==================================================================
+# 2. HELPER FUNCTION: CHUYỂN TIẾP REQUEST
+# ==================================================================
 async def forward_request(service_url: str, path: str, request: Request):
+    """
+    Hàm nhận request từ Client và gửi sang Service đích,
+    sau đó trả kết quả từ Service đích về cho Client.
+    """
     client = httpx.AsyncClient()
     
-    target_url = f"{service_url}/{path}"
+    # Đọc body từ request gốc
+    body = await request.body()
     
-    params = dict(request.query_params)
-    try:
-        body = await request.json()
-    except:
-        body = None 
-
-    # --- SỬA QUAN TRỌNG TẠI ĐÂY ---
-    # Loại bỏ 'host' VÀ 'content-length' để Gateway tự tính toán lại độ dài gói tin
-    headers = {
-        k: v for k, v in request.headers.items() 
-        if k.lower() not in ['host', 'content-length']
-    }
+    # Tạo URL đích (Ví dụ: http://user_service:8001/login)
+    # Nếu path rỗng thì không thêm dấu /
+    dest_url = f"{service_url}/{path}" if path else service_url
 
     try:
-        resp = await client.request(
+        response = await client.request(
             method=request.method,
-            url=target_url,
-            params=params,
-            json=body,
-            headers=headers,
-            timeout=10.0
+            url=dest_url,
+            headers=request.headers,
+            content=body,
+            params=request.query_params
         )
         
+        # Trả về nguyên vẹn phản hồi cho Client
         return Response(
-            content=resp.content,
-            status_code=resp.status_code,
-            headers=dict(resp.headers)
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers)
         )
+    except httpx.ConnectError:
+        return Response(content="Gateway Error: Cannot connect to downstream service", status_code=503)
     except Exception as e:
         return Response(content=f"Gateway Error: {str(e)}", status_code=500)
-    finally:
-        await client.aclose()
 
-# --- ĐỊNH TUYẾN (ROUTING) ---
-# Quy tắc: Xem đầu đường dẫn là gì để chọn Service
+# ==================================================================
+# 3. ĐỊNH TUYẾN (ROUTING)
+# ==================================================================
 
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def gateway_router(path: str, request: Request):
-    
-    # 1. Nhóm USER (Login, Register)
-    if path in ["login", "register"] or path.startswith("users"):
-        return await forward_request(USER_SERVICE, path, request)
-    
-    # 2. Nhóm RESTAURANT (Món ăn & Chi nhánh)
-    # --- THÊM: or path.startswith("branches") ---
-    elif path.startswith("foods") or path.startswith("seller") or path.startswith("branches"):
-        return await forward_request(RESTAURANT_SERVICE, path, request)
-    
-    # 3. Nhóm ORDER (Đơn hàng)
-    elif path.startswith("orders") or path == "checkout":
-        return await forward_request(ORDER_SERVICE, path, request)
-    
-    # 4. Nhóm CART (Giỏ hàng)
-    elif path.startswith("cart"):
-        return await forward_request(CART_SERVICE, path, request)
-        
-    else:
-        raise HTTPException(status_code=404, detail="Không tìm thấy đường dẫn này trên Gateway")
+# --- NHÓM 1: USER SERVICE (Auth & Address) ---
+# Các API: /login, /register, /verify, /users/addresses
+@app.api_route("/login", methods=["POST"])
+async def login_proxy(request: Request):
+    return await forward_request(USER_SERVICE_URL, "login", request)
+
+@app.api_route("/register", methods=["POST"])
+async def register_proxy(request: Request):
+    return await forward_request(USER_SERVICE_URL, "register", request)
+
+@app.api_route("/verify", methods=["GET"])
+async def verify_proxy(request: Request):
+    return await forward_request(USER_SERVICE_URL, "verify", request)
+
+@app.api_route("/users/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def users_general_proxy(path: str, request: Request):
+    # Forward các API như /users/addresses
+    return await forward_request(USER_SERVICE_URL, f"users/{path}", request)
+
+
+# --- NHÓM 2: RESTAURANT SERVICE (Food, Branch, Coupon, Review) ---
+# Các API: /foods, /branches, /coupons, /reviews
+@app.api_route("/foods", methods=["GET", "POST"])
+async def foods_root_proxy(request: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, "foods", request)
+
+@app.api_route("/foods/{path:path}", methods=["GET", "DELETE", "PUT"])
+async def foods_detail_proxy(path: str, request: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, f"foods/{path}", request)
+
+@app.api_route("/branches", methods=["GET", "POST"])
+async def branches_proxy(request: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, "branches", request)
+
+@app.api_route("/coupons", methods=["POST", "GET"])
+async def coupons_proxy(request: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, "coupons", request)
+
+@app.api_route("/coupons/{path:path}", methods=["GET"])
+async def coupons_detail_proxy(path: str, request: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, f"coupons/{path}", request)
+
+@app.api_route("/reviews", methods=["POST", "GET"])
+async def reviews_proxy(request: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, "reviews", request)
+
+
+# --- NHÓM 3: CART SERVICE (Giỏ hàng) ---
+@app.api_route("/cart", methods=["GET", "POST", "PUT", "DELETE"])
+async def cart_proxy(request: Request):
+    return await forward_request(CART_SERVICE_URL, "cart", request)
+
+
+# --- NHÓM 4: ORDER SERVICE (Đặt hàng) ---
+@app.api_route("/checkout", methods=["POST"])
+async def checkout_proxy(request: Request):
+    return await forward_request(ORDER_SERVICE_URL, "checkout", request)
+
+@app.api_route("/orders", methods=["GET"])
+async def orders_list_proxy(request: Request):
+    return await forward_request(ORDER_SERVICE_URL, "orders", request)
+
+@app.api_route("/orders/{path:path}", methods=["GET", "PUT"])
+async def orders_detail_proxy(path: str, request: Request):
+    # Forward các API như /orders/{id}/status, /orders/{id}/cancel
+    return await forward_request(ORDER_SERVICE_URL, f"orders/{path}", request)
+
+
+# --- NHÓM 5: PAYMENT SERVICE (Thanh toán) ---
+@app.api_route("/pay", methods=["POST"])
+async def pay_proxy(request: Request):
+    return await forward_request(PAYMENT_SERVICE_URL, "pay", request)

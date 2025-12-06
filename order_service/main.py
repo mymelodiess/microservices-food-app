@@ -1,39 +1,17 @@
-from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.security import APIKeyHeader
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
 import httpx
+from fastapi import FastAPI, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from jose import jwt, JWTError
-
+from database import SessionLocal, engine, Base
 import models
-from database import SessionLocal, engine
+from pydantic import BaseModel
+from typing import Optional
 
-# --- CẤU HÌNH ---
-SECRET_KEY = "chuoi_bi_mat_sieu_kho_doan_cua_ban"
-ALGORITHM = "HS256"
-
-# URL các service (Lưu ý: Thêm CART_SERVICE_URL)
-RESTAURANT_SERVICE_URL = "http://restaurant_service:8002"
-PAYMENT_SERVICE_URL = "http://payment_service:8004"
-CART_SERVICE_URL = "http://cart_service:8005"
-
-models.Base.metadata.create_all(bind=engine)
+# Tạo bảng (Nếu chưa có)
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# --- CẤU HÌNH CORS ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-oauth2_scheme = APIKeyHeader(name="Authorization")
-
+# --- DATABASE DEPENDENCY ---
 def get_db():
     db = SessionLocal()
     try:
@@ -41,110 +19,260 @@ def get_db():
     finally:
         db.close()
 
-# --- HÀM LẤY USER ID TỪ TOKEN ---
-def get_current_user_id(token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: int = payload.get("id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Token không chứa ID")
-        return user_id
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token không hợp lệ")
-
-# --- API ---
-
-@app.post("/checkout")
-async def checkout(
-    db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
-    token: str = Depends(oauth2_scheme) # Lấy nguyên chuỗi token để gửi đi
-):
-    # 1. Gọi sang Cart Service để lấy danh sách món
-    async with httpx.AsyncClient() as client:
-        headers = {"Authorization": token} # Gửi kèm Token để Cart biết là User nào
-        
-        try:
-            # Lấy giỏ hàng
-            cart_res = await client.get(f"{CART_SERVICE_URL}/cart", headers=headers)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Không kết nối được Cart Service: {e}")
-
-        if cart_res.status_code != 200:
-            raise HTTPException(status_code=400, detail="Lỗi khi lấy giỏ hàng")
-        
-        cart_items = cart_res.json() # Dạng: [{"food_id": 1, "quantity": 2}, ...]
-        
-        if not cart_items:
-            raise HTTPException(status_code=400, detail="Giỏ hàng đang trống!")
-
-        # 2. Tính tiền & Chuẩn bị dữ liệu Order
-        total_price = 0
-        db_items = []
-
-        for item in cart_items:
-            # Gọi Restaurant Service lấy giá mới nhất của từng món
-            food_res = await client.get(f"{RESTAURANT_SERVICE_URL}/foods/{item['food_id']}")
-            if food_res.status_code != 200:
-                raise HTTPException(status_code=400, detail=f"Món ăn ID {item['food_id']} không tồn tại hoặc đã bị xóa")
-            
-            food_data = food_res.json()
-            subtotal = food_data['price'] * item['quantity']
-            total_price += subtotal
-            
-            # Tạo chi tiết đơn hàng (OrderItem)
-            db_item = models.OrderItem(
-                food_name=food_data['name'],
-                quantity=item['quantity'],
-                unit_price=food_data['price'],
-                subtotal=subtotal
-            )
-            db_items.append(db_item)
-
-        # 3. Lưu Order vào DB
-        new_order = models.Order(
-            user_name=f"User ID {user_id}",
-            total_price=total_price,
-            status="PENDING"
-        )
-        db.add(new_order)
-        db.commit()
-        db.refresh(new_order)
-
-        # Lưu các món vào đơn
-        for item in db_items:
-            item.order_id = new_order.id
-            db.add(item)
-        db.commit()
-
-        # 4. Gọi Payment Service
-        await client.post(f"{PAYMENT_SERVICE_URL}/payments", json={"order_id": new_order.id, "amount": total_price})
-        
-        # 5. QUAN TRỌNG: Quay lại Cart Service để xóa sạch giỏ hàng
-        await client.delete(f"{CART_SERVICE_URL}/cart", headers=headers)
-
-    return {"message": "Checkout thành công", "order_id": new_order.id, "total": total_price}
-
-@app.get("/orders")
-def get_orders(db: Session = Depends(get_db)):
-    return db.query(models.Order).all()
-
-# ... (Code cũ ở trên)
+# --- INPUT MODELS (Các dữ liệu đầu vào) ---
+class CheckoutRequest(BaseModel):
+    address: str
+    phone: str
+    coupon_code: Optional[str] = None # Mã giảm giá (không bắt buộc)
 
 class OrderStatusUpdate(BaseModel):
     status: str
 
-@app.put("/orders/{order_id}/status")  # <--- Đảm bảo dòng này đã có
-def update_order_status(
-    order_id: int, 
-    status_update: OrderStatusUpdate,
-    db: Session = Depends(get_db)
-):
+# --- HELPER: GỌI USER SERVICE ĐỂ XÁC THỰC ---
+async def verify_user(request: Request):
+    token = request.headers.get("Authorization")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Token")
+    
+    try:
+        # Gọi sang User Service (Port 8001)
+        async with httpx.AsyncClient() as client:
+            res = await client.get("http://user_service:8001/verify", headers={"Authorization": token})
+            
+            if res.status_code == 200:
+                return res.json() # Trả về info user (id, role, branch_id...)
+            else:
+                raise HTTPException(status_code=401, detail="Invalid Token from User Service")
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="User Service Unavailable")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+# ==========================================
+# API 1: CHECKOUT (TẠO ĐƠN HÀNG)
+# ==========================================
+@app.post("/checkout")
+async def checkout(payload: CheckoutRequest, request: Request, db: Session = Depends(get_db)):
+    # 1. Xác thực User
+    user = await verify_user(request)
+    user_id = user['id']
+    token = request.headers.get("Authorization")
+    headers = {"Authorization": token}
+
+    # 2. Lấy items từ Cart Service
+    async with httpx.AsyncClient() as client:
+        try:
+            cart_res = await client.get("http://cart_service:8005/cart", headers=headers)
+            if cart_res.status_code != 200:
+                raise HTTPException(status_code=400, detail="Lỗi kết nối Cart Service")
+            cart_items = cart_res.json()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Cart Service Error: {e}")
+
+    if not cart_items:
+        raise HTTPException(status_code=400, detail="Giỏ hàng trống")
+
+    # 3. Tính toán tiền (Gọi Restaurant Service để lấy giá chuẩn)
+    branch_id = cart_items[0]['branch_id']
+    final_items = []
+    subtotal = 0 # Tổng tiền hàng (đã trừ khuyến mãi món ăn)
+
+    async with httpx.AsyncClient() as client:
+        # Lấy menu của quán đó để tra cứu
+        food_res = await client.get(f"http://restaurant_service:8002/foods?branch_id={branch_id}")
+        if food_res.status_code != 200:
+             raise HTTPException(status_code=500, detail="Lỗi kết nối Restaurant Service")
+        
+        # Tạo map để tra cứu nhanh: {id: food_info}
+        menu_map = {f['id']: f for f in food_res.json()}
+
+        for item in cart_items:
+            f_id = item['food_id']
+            qty = item['quantity']
+            
+            food_info = menu_map.get(f_id)
+            if food_info:
+                # Tính giá sau giảm giá (Discount từng món)
+                original_price = food_info['price']
+                item_discount = food_info.get('discount', 0)
+                final_item_price = original_price * (1 - item_discount/100)
+                
+                line_total = final_item_price * qty
+                subtotal += line_total
+                
+                final_items.append({
+                    "food_id": f_id,
+                    "food_name": food_info['name'],
+                    "price": final_item_price,
+                    "quantity": qty
+                })
+
+    if not final_items:
+        raise HTTPException(status_code=400, detail="Không tìm thấy thông tin món ăn hợp lệ")
+
+    # 4. Xử lý Coupon (Nếu có)
+    coupon_discount_amount = 0
+    if payload.coupon_code:
+        async with httpx.AsyncClient() as client:
+            verify_url = "http://restaurant_service:8002/coupons/verify"
+            try:
+                cp_res = await client.get(verify_url, params={"code": payload.coupon_code, "branch_id": branch_id})
+                
+                if cp_res.status_code == 200:
+                    coupon_data = cp_res.json()
+                    percent = coupon_data['discount_percent']
+                    # Tính tiền giảm
+                    coupon_discount_amount = subtotal * (percent / 100)
+                else:
+                    raise HTTPException(status_code=400, detail="Mã giảm giá không hợp lệ")
+            except httpx.RequestError:
+                 raise HTTPException(status_code=500, detail="Lỗi kiểm tra Coupon")
+
+    # Giá cuối cùng (Không âm)
+    final_total_price = max(0, subtotal - coupon_discount_amount)
+
+    # 5. Lưu đơn hàng vào DB
+    new_order = models.Order(
+        user_id=user_id,
+        user_name=user.get('sub', 'Unknown'),
+        branch_id=branch_id,
+        total_price=final_total_price,
+        status="PENDING_PAYMENT",       # Mặc định chờ thanh toán
+        
+        # Thông tin giao hàng
+        delivery_address=payload.address,
+        customer_phone=payload.phone,
+        
+        # Thông tin Coupon
+        coupon_code=payload.coupon_code,
+        discount_amount=coupon_discount_amount
+    )
+    db.add(new_order)
+    db.commit()
+    db.refresh(new_order)
+
+    # 6. Lưu chi tiết đơn hàng
+    for item in final_items:
+        order_item = models.OrderItem(
+            order_id=new_order.id,
+            food_id=item['food_id'],
+            food_name=item['food_name'],
+            price=item['price'],
+            quantity=item['quantity']
+        )
+        db.add(order_item)
+    
+    db.commit()
+
+    # 7. Xóa giỏ hàng
+    async with httpx.AsyncClient() as client:
+        await client.delete("http://cart_service:8005/cart", headers=headers)
+
+    return {
+        "message": "Order created successfully", 
+        "order_id": new_order.id, 
+        "total": final_total_price,
+        "status": "PENDING_PAYMENT"
+    }
+
+# ==========================================
+# API 2: LẤY DANH SÁCH ĐƠN HÀNG
+# ==========================================
+@app.get("/orders")
+async def get_orders(request: Request, db: Session = Depends(get_db)):
+    user = await verify_user(request)
+    
+    # Seller: Chỉ thấy đơn quán mình
+    if user['role'] == 'seller':
+        branch_id = user.get('branch_id')
+        if not branch_id: return [] 
+        return db.query(models.Order).filter(models.Order.branch_id == branch_id).order_by(models.Order.id.desc()).all()
+    
+    # Buyer: Chỉ thấy đơn của mình
+    else:
+        return db.query(models.Order).filter(models.Order.user_id == user['id']).order_by(models.Order.id.desc()).all()
+
+# ... (Giữ nguyên phần đầu file: import, helper, checkout...)
+# Chỉ cần thay đổi API update_order_status ở gần cuối thôi.
+# Để an toàn, đây là đoạn code bạn cần thay thế cho API đó:
+
+@app.put("/orders/{order_id}/status")
+async def update_order_status(order_id: int, payload: OrderStatusUpdate, request: Request, db: Session = Depends(get_db)):
+    user = await verify_user(request)
+    
+    # Chỉ Seller (Owner hoặc Staff đều được)
+    if user['role'] != 'seller':
+        raise HTTPException(status_code=403, detail="Chỉ Seller mới được cập nhật")
+
+    # Staff cũng cần có branch_id thì mới biết đang làm cho quán nào
+    if not user.get('branch_id'):
+        raise HTTPException(status_code=403, detail="Tài khoản này chưa được gán vào quán nào")
+
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
-        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
-    
-    order.status = status_update.status
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
+        
+    if order.branch_id != user.get('branch_id'):
+        raise HTTPException(status_code=403, detail="Đơn hàng này không thuộc quán của bạn")
+
+    order.status = payload.status
     db.commit()
-    db.refresh(order)
-    return {"message": "Status updated", "status": order.status}
+    
+    return {"message": "Updated status", "status": payload.status}
+
+# ... (Các API Confirm Payment, Cancel, Check Review giữ nguyên)
+# ==========================================
+# API 4: XÁC NHẬN THANH TOÁN (Internal - Payment Service gọi)
+# ==========================================
+@app.put("/orders/{order_id}/paid")
+def confirm_payment(order_id: int, db: Session = Depends(get_db)):
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Chỉ xác nhận khi đơn đang chờ thanh toán
+    if order.status == "PENDING_PAYMENT":
+        order.status = "WAITING_CONFIRM"
+        db.commit()
+        
+    return {"status": order.status}
+
+# ==========================================
+# API 5: HỦY ĐƠN HÀNG (CHO BUYER)
+# ==========================================
+@app.put("/orders/{order_id}/cancel")
+async def cancel_order(order_id: int, request: Request, db: Session = Depends(get_db)):
+    user = await verify_user(request)
+    
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not order: raise HTTPException(404, "Not found")
+    
+    if order.user_id != user['id']: raise HTTPException(403, "Not your order")
+    
+    if order.status not in ["PENDING_PAYMENT", "WAITING_CONFIRM"]:
+        raise HTTPException(400, "Không thể hủy đơn hàng đang xử lý")
+    
+    order.status = "CANCELLED"
+    db.commit()
+    return {"status": "CANCELLED", "message": "Đã hủy đơn hàng"}
+
+# ==========================================
+# API 6: CHECK QUYỀN REVIEW (Internal - Restaurant Service gọi)
+# ==========================================
+@app.get("/orders/{order_id}/check-review")
+def check_review_permission(order_id: int, user_id: int, db: Session = Depends(get_db)):
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    
+    if not order:
+        raise HTTPException(404, detail="Đơn hàng không tồn tại")
+        
+    if order.user_id != user_id:
+        raise HTTPException(403, detail="Bạn không phải chủ đơn hàng này")
+        
+    if order.status != "COMPLETED":
+        raise HTTPException(400, detail="Đơn hàng chưa hoàn tất, chưa thể đánh giá")
+        
+    return {
+        "status": "ok", 
+        "branch_id": order.branch_id
+    }

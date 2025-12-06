@@ -3,18 +3,14 @@ import httpx
 import time
 import pandas as pd
 
-# --- CẤU HÌNH API (Đảm bảo port đúng với máy bạn) ---
-USER_URL = "http://localhost:8001"
-RESTAURANT_URL = "http://localhost:8002"
-ORDER_URL = "http://localhost:8003"
-CART_URL = "http://localhost:8005"
+# --- CẤU HÌNH API ---
+GATEWAY_URL = "http://localhost:8000"
 
 # --- KHỞI TẠO SESSION ---
 if 'token' not in st.session_state: st.session_state['token'] = None
 if 'user_role' not in st.session_state: st.session_state['user_role'] = ""
 if 'user_name' not in st.session_state: st.session_state['user_name'] = ""
-if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None # ID chi nhánh của Seller
-if 'cart' not in st.session_state: st.session_state['cart'] = []
+if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
 
 st.set_page_config(page_title="Micro Food App", page_icon="🍔", layout="wide")
 
@@ -23,8 +19,9 @@ st.markdown("""
 <style>
     .food-card { border: 1px solid #ddd; border-radius: 10px; padding: 15px; margin-bottom: 10px; background: white; }
     .price-tag { color: #e44d26; font-weight: bold; font-size: 1.1rem; }
+    .old-price { text-decoration: line-through; color: #888; font-size: 0.9rem; margin-right: 5px; }
+    .discount-badge { background-color: #ff4b4b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .role-badge { background-color: #f0f2f6; padding: 5px 10px; border-radius: 5px; font-weight: bold; }
-    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -38,303 +35,302 @@ def get_food_image(food_name):
     return "https://placehold.co/600x400?text=Food"
 
 # ==========================================
-# SIDEBAR: ĐĂNG NHẬP / ĐĂNG KÝ
+# SIDEBAR: LOGIN / REGISTER
 # ==========================================
 with st.sidebar:
     st.title("Micro Food 🚀")
-    
-    # TRẠNG THÁI: CHƯA ĐĂNG NHẬP
     if st.session_state['token'] is None:
-        tab_login, tab_register = st.tabs(["🔐 Đăng Nhập", "📝 Đăng Ký"])
+        tab_login, tab_register = st.tabs(["🔐 Login", "📝 Register"])
         
-        # --- TAB ĐĂNG NHẬP ---
+        # --- LOGIN ---
         with tab_login:
-            email_login = st.text_input("Email Login", value="seller_1@gmail.com") 
-            password_login = st.text_input("Mật khẩu Login", type="password", value="123")
-            if st.button("Đăng nhập", type="primary", use_container_width=True):
+            email = st.text_input("Email", value="seller_1@gmail.com")
+            pwd = st.text_input("Pass", type="password", value="123")
+            if st.button("Đăng nhập"):
                 try:
-                    res = httpx.post(f"{USER_URL}/login", json={"email": email_login, "password": password_login})
+                    res = httpx.post(f"{GATEWAY_URL}/login", json={"email": email, "password": pwd})
                     if res.status_code == 200:
                         data = res.json()
                         st.session_state['token'] = data['access_token']
                         st.session_state['user_role'] = data['role']
-                        st.session_state['user_name'] = email_login.split('@')[0]
-                        # QUAN TRỌNG: Lưu ID chi nhánh nếu là Seller
+                        st.session_state['user_name'] = email.split('@')[0]
                         st.session_state['branch_id'] = data.get('branch_id')
-                        
-                        st.success("Thành công!")
-                        time.sleep(0.5)
                         st.rerun()
-                    else: st.error(f"Lỗi: {res.json().get('detail')}")
-                except Exception as e: st.error(f"Lỗi kết nối: {e}")
-
-        # --- TAB ĐĂNG KÝ ---
+                    else: st.error(res.text)
+                except Exception as e: st.error(f"Err: {e}")
+        
+        # --- REGISTER (ĐÃ KHÔI PHỤC) ---
         with tab_register:
             with st.form("reg_form"):
-                new_name = st.text_input("Họ và tên")
-                new_email = st.text_input("Email")
+                st.write("Tạo tài khoản Buyer mới")
+                new_name = st.text_input("Họ tên")
+                new_email = st.text_input("Email Đăng Ký")
                 new_pass = st.text_input("Mật khẩu", type="password")
-                confirm_pass = st.text_input("Nhập lại", type="password")
+                confirm_pass = st.text_input("Nhập lại mật khẩu", type="password")
                 
-                # Mặc định là Buyer. Nếu muốn tạo Seller, hãy dùng script init_data.py hoặc tạo qua Adminer
-                role = "buyer" 
-
                 if st.form_submit_button("Đăng ký ngay"):
                     if new_pass != confirm_pass:
-                        st.error("Mật khẩu không khớp")
+                        st.error("Mật khẩu không khớp!")
                     else:
                         try:
-                            payload = {"name": new_name, "email": new_email, "password": new_pass, "role": role}
-                            res = httpx.post(f"{USER_URL}/register", json=payload)
-                            if res.status_code == 200: st.success("Đăng ký thành công! Hãy đăng nhập.")
-                            else: st.error(f"Lỗi: {res.text}")
-                        except Exception as e: st.error(f"Lỗi kết nối: {e}")
+                            # Mặc định role là Buyer
+                            payload = {"name": new_name, "email": new_email, "password": new_pass, "role": "buyer"}
+                            res = httpx.post(f"{GATEWAY_URL}/register", json=payload)
+                            if res.status_code == 200:
+                                st.success("Đăng ký thành công! Hãy chuyển sang Tab Login.")
+                            else:
+                                st.error(f"Lỗi: {res.text}")
+                        except Exception as e:
+                            st.error(f"Lỗi Gateway: {e}")
 
-    # TRẠNG THÁI: ĐÃ ĐĂNG NHẬP
     else:
-        st.success(f"Xin chào, **{st.session_state['user_name']}**")
-        st.markdown(f"<span class='role-badge'>Role: {st.session_state['user_role'].upper()}</span>", unsafe_allow_html=True)
-        if st.session_state['branch_id']:
-            st.info(f"📍 Quản lý Chi nhánh ID: {st.session_state['branch_id']}")
-            
-        st.write("")
-        if st.button("Đăng xuất", use_container_width=True):
-            st.session_state['token'] = None
-            st.session_state['branch_id'] = None
-            st.session_state['cart'] = []
-            st.rerun()
+        st.success(f"Hi, {st.session_state['user_name']}")
+        st.markdown(f"Role: **{st.session_state['user_role'].upper()}**")
+        if st.button("Logout"):
+            st.session_state['token'] = None; st.rerun()
 
 # ==========================================
-# GIAO DIỆN CHÍNH
+# MAIN APP
 # ==========================================
 if st.session_state['token']:
-    headers = {"Authorization": st.session_state['token']}
-    
-    # ----------------------------------------
-    # [1] GIAO DIỆN NGƯỜI BÁN (SELLER)
-    # ----------------------------------------
+    # Thêm tiền tố Bearer cho chuẩn giao thức
+    headers = {"Authorization": f"Bearer {st.session_state['token']}"}
+
+    # --- SELLER ---
     if st.session_state['user_role'] == 'seller':
         st.header("👨‍🍳 Kênh Người Bán")
         
-        # Kiểm tra xem Seller đã được gán chi nhánh chưa
+        # Check xem có Branch ID chưa
         if not st.session_state['branch_id']:
-            st.warning("⚠️ Tài khoản của bạn chưa được gán vào Chi nhánh nào. Vui lòng liên hệ Admin (hoặc sửa trong Database)!")
+            st.warning("⚠️ User này là Seller nhưng chưa được gán vào Chi nhánh nào (Database).")
             st.stop()
-            
-        tab_create, tab_my_foods, tab_manage_orders = st.tabs(["➕ Thêm Món", "📋 Thực Đơn Của Tôi", "📦 Quản Lý Đơn"])
+
+        tabs = st.tabs(["Thêm Món", "Thực Đơn", "Đơn Hàng"])
         
-        with tab_create:
-            with st.form("add_food"):
-                st.write(f"Đang thêm món vào Chi nhánh ID: **{st.session_state['branch_id']}**")
+        with tabs[0]: # Thêm Món
+            with st.form("add"):
+                st.write(f"Thêm món vào Chi nhánh ID: {st.session_state['branch_id']}")
                 name = st.text_input("Tên món")
-                price = st.number_input("Giá", min_value=0, step=1000)
-                
-                if st.form_submit_button("Lưu món ăn"):
+                price = st.number_input("Giá gốc", step=1000)
+                discount = st.number_input("Giảm giá (%)", min_value=0, max_value=100, value=0)
+                if st.form_submit_button("Lưu"):
+                    payload = {
+                        "name": name, "price": price, 
+                        "branch_id": st.session_state['branch_id'],
+                        "discount": discount
+                    }
                     try:
-                        # Tự động lấy branch_id từ session
-                        payload = {
-                            "name": name, 
-                            "price": price, 
-                            "branch_id": st.session_state['branch_id']
-                        }
-                        res = httpx.post(f"{RESTAURANT_URL}/foods", json=payload, headers=headers)
-                        if res.status_code == 200: 
-                            st.success(f"Đã thêm: {name}")
-                            time.sleep(1); st.rerun()
+                        res = httpx.post(f"{GATEWAY_URL}/foods", json=payload, headers=headers)
+                        if res.status_code == 200:
+                            st.success("Đã thêm!"); time.sleep(1); st.rerun()
                         else: st.error(f"Lỗi: {res.text}")
-                    except Exception as e: st.error(f"Lỗi kết nối: {e}")
-
-        # --- TÌM TAB THỰC ĐƠN VÀ THAY THẾ BẰNG CODE DƯỚI ĐÂY ---
-        with tab_my_foods:
+                    except Exception as e: st.error(f"Kết nối lỗi: {e}")
+        
+        with tabs[1]: # Thực Đơn
             try:
-                # Lấy danh sách món của chi nhánh hiện tại
-                res = httpx.get(f"{RESTAURANT_URL}/foods", params={"branch_id": st.session_state['branch_id']})
-                
+                res = httpx.get(f"{GATEWAY_URL}/foods", params={"branch_id": st.session_state['branch_id']})
                 if res.status_code == 200:
-                    my_foods = res.json()
-                    
-                    if my_foods:
-                        st.success(f"Chi nhánh đang có {len(my_foods)} món")
-                        
-                        # Tạo tiêu đề bảng
-                        h1, h2, h3 = st.columns([3, 1, 1])
-                        h1.markdown("**Tên món**")
-                        h2.markdown("**Giá bán**")
-                        h3.markdown("**Hành động**")
-                        st.divider()
-                        
-                        # Duyệt qua từng món để hiển thị
-                        for f in my_foods:
-                            c1, c2, c3 = st.columns([3, 1, 1])
-                            
-                            # Cột 1: Tên + Ảnh (nếu muốn)
-                            c1.write(f"🍛 {f['name']}")
-                            
-                            # Cột 2: Giá
-                            c2.write(f"{f['price']:,} đ")
-                            
-                            # Cột 3: Nút Xóa
-                            # Key=... để Streamlit phân biệt nút của các món khác nhau
-                            if c3.button("🗑️ Xóa", key=f"del_{f['id']}"):
-                                with st.spinner("Đang xóa..."):
-                                    # Gọi API DELETE
-                                    del_res = httpx.delete(f"{RESTAURANT_URL}/foods/{f['id']}", headers=headers)
-                                    
-                                    if del_res.status_code == 200:
-                                        st.success("Đã xóa!")
-                                        time.sleep(0.5) # Đợi xíu cho đẹp
-                                        st.rerun()      # Tải lại trang
-                                    else:
-                                        st.error(f"Lỗi: {del_res.json().get('detail')}")
-                            
-                            st.divider() # Kẻ đường gạch ngang ngăn cách
-                    else:
-                        st.info("Chi nhánh chưa có món nào. Hãy thêm món mới!")
-                else:
-                    st.error("Lỗi kết nối Server")
-            except Exception as e:
-                st.error(f"Lỗi: {e}")
+                    for f in res.json():
+                        c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+                        c1.write(f"**{f['name']}**")
+                        c2.write(f"{f['price']:,}đ")
+                        c3.write(f"-{f['discount']}%")
+                        if c4.button("Xóa", key=f"d_{f['id']}"):
+                            httpx.delete(f"{GATEWAY_URL}/foods/{f['id']}", headers=headers)
+                            st.rerun()
+                else: st.info("Chưa có món ăn nào.")
+            except: st.error("Không tải được thực đơn.")
 
-        with tab_manage_orders:
-            st.subheader("Đơn hàng cần xử lý")
-            if st.button("🔄 Cập nhật"): st.rerun()
-            # Phần này cần cập nhật Order Service để lọc theo branch_id sau
-            # Tạm thời vẫn hiển thị đơn như cũ
-            try:
-                res = httpx.get(f"{ORDER_URL}/orders", headers=headers)
-                if res.status_code == 200:
-                    orders = res.json()
-                    for o in orders:
-                        with st.expander(f"Đơn #{o['id']} - {o['status']} ({o['total_price']:,} đ)"):
-                            st.write(f"Khách: {o['user_name']}")
-                            c1, c2, c3 = st.columns(3)
-                            if c1.button("Nấu", key=f"c_{o['id']}"): httpx.put(f"{ORDER_URL}/orders/{o['id']}/status", json={"status":"COOKING"}, headers=headers); st.rerun()
-                            if c2.button("Giao", key=f"s_{o['id']}"): httpx.put(f"{ORDER_URL}/orders/{o['id']}/status", json={"status":"DELIVERING"}, headers=headers); st.rerun()
-                            if c3.button("Xong", key=f"d_{o['id']}"): httpx.put(f"{ORDER_URL}/orders/{o['id']}/status", json={"status":"COMPLETED"}, headers=headers); st.rerun()
-                else: st.warning("Chưa tải được đơn hàng (Check Order Service)")
-            except: st.error("Lỗi kết nối Order Service")
+        with tabs[2]: # Đơn hàng (Cũ - Chưa nâng cấp)
+            st.info("Chức năng quản lý đơn hàng sẽ được nâng cấp ở Bước 4.")
 
-    # ----------------------------------------
-    # [2] GIAO DIỆN NGƯỜI MUA (BUYER)
-    # ----------------------------------------
+    # --- BUYER (Logic Mới) ---
     elif st.session_state['user_role'] == 'buyer':
-        st.header("😋 Trang Đặt Món")
+        st.header("😋 Bạn muốn ăn gì hôm nay?")
         
-        # --- BƯỚC 1: CHỌN CHI NHÁNH ---
-        try:
-            branches_res = httpx.get(f"{RESTAURANT_URL}/branches")
-            branches = branches_res.json() if branches_res.status_code == 200 else []
-        except: branches = []
+        tab_home, tab_cart = st.tabs(["🏠 Trang Chủ", "🛒 Giỏ Hàng"])
 
-        if not branches:
-            st.error("⚠️ Hệ thống chưa có chi nhánh nào hoạt động.")
-            st.stop()
+        # 1. TRANG CHỦ (TÌM KIẾM & GỘP NHÓM)
+        with tab_home:
+            # Gọi API Search mới
+            try:
+                res = httpx.get(f"{GATEWAY_URL}/foods/search")
+                foods = res.json() if res.status_code == 200 else []
+            except: foods = []
 
-        branch_map = {b['id']: b['name'] for b in branches}
-        
-        # Selectbox chọn chi nhánh
-        col_br, col_none = st.columns([1, 2])
-        with col_br:
-            selected_branch_id = st.selectbox(
-                "📍 Chọn chi nhánh gần bạn:", 
-                options=list(branch_map.keys()), 
-                format_func=lambda x: branch_map[x]
-            )
-        
-        st.divider()
-
-        # --- BƯỚC 2: HIỆN MENU CỦA CHI NHÁNH ĐÓ ---
-        try:
-            # Gọi API lấy món ăn theo branch_id
-            all_foods = httpx.get(f"{RESTAURANT_URL}/foods", params={"branch_id": selected_branch_id}).json()
-            food_map = {f['id']: f for f in all_foods}
-        except: 
-            all_foods = []
-            food_map = {}
-
-        tab_menu, tab_cart, tab_history = st.tabs(["🍔 Thực Đơn", "🛒 Giỏ Hàng", "📜 Lịch Sử Đơn"])
-
-        # MENU
-        with tab_menu:
-            if all_foods:
+            if foods:
                 cols = st.columns(3)
-                for i, food in enumerate(all_foods):
+                for i, f in enumerate(foods):
                     with cols[i % 3]:
                         with st.container(border=True):
-                            st.image(get_food_image(food['name']), use_container_width=True)
-                            st.markdown(f"**{food['name']}**")
-                            st.markdown(f"<span class='price-tag'>{food['price']:,} đ</span>", unsafe_allow_html=True)
+                            st.image(get_food_image(f['name']), use_container_width=True)
+                            st.subheader(f['name'])
                             
-                            if st.button("Thêm ➕", key=f"add_{food['id']}", use_container_width=True):
-                                try:
-                                    res = httpx.post(f"{CART_URL}/cart", json={"food_id": food['id'], "quantity": 1}, headers=headers)
-                                    if res.status_code == 200: st.toast(f"Đã thêm {food['name']}", icon="😋")
-                                    else: st.error("Lỗi thêm giỏ")
-                                except: st.error("Lỗi kết nối Cart")
-            else:
-                st.info(f"Chi nhánh {branch_map[selected_branch_id]} hiện chưa cập nhật thực đơn.")
+                            # Hiển thị khoảng giá
+                            if f['min_price'] == f['max_price']:
+                                st.write(f"💰 **{int(f['min_price']):,} đ**")
+                            else:
+                                st.write(f"💰 **{int(f['min_price']):,} đ - {int(f['max_price']):,} đ**")
+                            
+                            st.caption(f"Đang bán tại {f['branch_count']} chi nhánh")
+                            
+                            # Nút xem chi tiết
+                            if st.button("Xem nơi bán", key=f"v_{f['name']}"):
+                                st.session_state['viewing_food'] = f['name']
 
-        # GIỎ HÀNG
+            # --- MODAL/EXPANDER: HIỆN DANH SÁCH QUÁN ---
+            if 'viewing_food' in st.session_state:
+                st.divider()
+                st.markdown(f"### 🏪 Các quán bán: :orange[{st.session_state['viewing_food']}]")
+                
+                # Gọi API lấy options
+                try:
+                    opt_res = httpx.get(f"{GATEWAY_URL}/foods/options", params={"name": st.session_state['viewing_food']})
+                    options = opt_res.json()
+                    
+                    for opt in options:
+                        c1, c2, c3 = st.columns([2, 2, 1])
+                        c1.markdown(f"**{opt['branch_name']}**")
+                        
+                        # Logic hiển thị giá giảm
+                        with c2:
+                            if opt['discount'] > 0:
+                                st.markdown(f"""
+                                    <span class='old-price'>{int(opt['original_price']):,}đ</span>
+                                    <span class='price-tag'>{int(opt['final_price']):,}đ</span>
+                                    <span class='discount-badge'>-{opt['discount']}%</span>
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"**{int(opt['final_price']):,} đ**")
+                        
+                        if c3.button("Thêm ➕", key=f"add_c_{opt['food_id']}"):
+                            # Thêm vào giỏ
+                            # --- UPDATE: Gửi kèm branch_id ---
+                            cart_res = httpx.post(f"{GATEWAY_URL}/cart", 
+                                                json={
+                                                    "food_id": opt['food_id'], 
+                                                    "quantity": 1, 
+                                                    "branch_id": opt['branch_id'] # <--- QUAN TRỌNG
+                                                }, 
+                                                headers=headers)
+                            if cart_res.status_code == 200:
+                                st.toast("Đã thêm vào giỏ!", icon="✅")
+                            else:
+                                st.error("Lỗi: " + cart_res.text)
+
+                    if st.button("Đóng danh sách"):
+                        del st.session_state['viewing_food']
+                        st.rerun()
+                except Exception as e: st.error(f"Lỗi tải options: {e}")
+
+        # 2. GIỎ HÀNG (ĐÃ NÂNG CẤP)
         with tab_cart:
             try:
-                cart_res = httpx.get(f"{CART_URL}/cart", headers=headers)
-                cart_items = cart_res.json() if cart_res.status_code == 200 else []
+                # 1. Lấy dữ liệu giỏ hàng từ Cart Service
+                cart_res = httpx.get(f"{GATEWAY_URL}/cart", headers=headers)
                 
-                if cart_items:
-                    total = 0
-                    for item in cart_items:
-                        # Lưu ý: food_map chỉ chứa món của chi nhánh đang chọn. 
-                        # Nếu trong giỏ có món của chi nhánh khác, tên có thể bị lỗi None.
-                        # Ta nên gọi API lấy chi tiết món nếu cần, nhưng tạm thời lấy từ map.
-                        info = food_map.get(item['food_id']) 
+                if cart_res.status_code == 200:
+                    cart_items = cart_res.json()
+                    
+                    if not cart_items:
+                        st.info("🛒 Giỏ hàng của bạn đang trống. Hãy ra Trang chủ chọn món nhé!")
+                    else:
+                        # 2. Lấy thông tin chi tiết món ăn từ Restaurant Service
+                        # (Vì Cart Service chỉ lưu food_id, không lưu tên/ảnh)
                         
-                        if info:
-                            sub = info['price'] * item['quantity']
-                            total += sub
-                            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-                            c1.markdown(f"**{info['name']}**")
-                            with c2:
-                                cm1, cm2, cm3 = st.columns([1,1,1])
-                                if cm1.button("➖", key=f"dec_{item['food_id']}"):
-                                    httpx.put(f"{CART_URL}/cart", json={"food_id": item['food_id'], "quantity": item['quantity']-1}, headers=headers); st.rerun()
-                                cm2.write(f"**{item['quantity']}**")
-                                if cm3.button("➕", key=f"inc_{item['food_id']}"):
-                                    httpx.put(f"{CART_URL}/cart", json={"food_id": item['food_id'], "quantity": item['quantity']+1}, headers=headers); st.rerun()
-                            c3.write(f"{sub:,} đ")
-                            if c4.button("🗑️", key=f"del_{item['food_id']}"):
-                                httpx.put(f"{CART_URL}/cart", json={"food_id": item['food_id'], "quantity": 0}, headers=headers); st.rerun()
+                        # Lấy branch_id từ món đầu tiên (Quy tắc 1 giỏ - 1 quán)
+                        current_branch_id = cart_items[0]['branch_id']
+                        
+                        # Gọi API lấy menu của quán đó để map thông tin
+                        food_res = httpx.get(f"{GATEWAY_URL}/foods", params={"branch_id": current_branch_id})
+                        if food_res.status_code == 200:
+                            # Tạo dictionary để tra cứu nhanh: {food_id: food_info}
+                            food_map = {f['id']: f for f in food_res.json()}
+                            
+                            st.success(f"Đang đặt món tại Chi nhánh ID: {current_branch_id}")
                             st.divider()
-                        else:
-                            st.warning(f"Món ID {item['food_id']} thuộc chi nhánh khác hoặc không tồn tại.")
-                    
-                    st.markdown(f"### Tổng: :red[{total:,} đ]")
-                    if st.button("Thanh Toán", type="primary", use_container_width=True):
-                        try:
-                            res = httpx.post(f"{ORDER_URL}/checkout", headers=headers)
-                            if res.status_code == 200:
-                                st.success(f"Đặt hàng thành công! Mã đơn: {res.json()['order_id']}")
-                                st.balloons()
-                                httpx.delete(f"{CART_URL}/cart", headers=headers)
-                                time.sleep(2); st.rerun()
-                            else: st.error(f"Lỗi: {res.text}")
-                        except: st.error("Lỗi Order Service")
-                    
-                    if st.button("Xóa hết giỏ hàng"):
-                        httpx.delete(f"{CART_URL}/cart", headers=headers); st.rerun()
-                else: st.info("Giỏ hàng trống.")
-            except Exception as e: st.error(f"Lỗi tải giỏ hàng: {e}")
 
-        # LỊCH SỬ
-        with tab_history:
-            if st.button("Tải lại lịch sử"):
-                try:
-                    orders = httpx.get(f"{ORDER_URL}/orders", headers=headers).json()
-                    if orders:
-                        df = pd.DataFrame(orders)
-                        st.dataframe(df[['id', 'total_price', 'status']], use_container_width=True)
-                    else: st.info("Chưa có đơn hàng nào.")
-                except: st.error("Lỗi kết nối")
-    else:
-        st.error("Role không xác định")
-else:
-    st.info("👈 Vui lòng đăng nhập hoặc đăng ký ở menu bên trái.")
+                            total_bill = 0
+                            
+                            for item in cart_items:
+                                f_id = item['food_id']
+                                qty = item['quantity']
+                                info = food_map.get(f_id)
+
+                                if info:
+                                    # Tính giá sau giảm
+                                    discount = info.get('discount', 0)
+                                    final_price = info['price'] * (1 - discount/100)
+                                    item_total = final_price * qty
+                                    total_bill += item_total
+
+                                    # Hiển thị giao diện từng dòng
+                                    with st.container(border=True):
+                                        c1, c2, c3, c4 = st.columns([1, 3, 2, 1])
+                                        
+                                        with c1:
+                                            st.image(get_food_image(info['name']), use_container_width=True)
+                                        
+                                        with c2:
+                                            st.markdown(f"**{info['name']}**")
+                                            if discount > 0:
+                                                st.caption(f"Giá gốc: ~~{int(info['price']):,}đ~~")
+                                                st.markdown(f":red[**{int(final_price):,}đ**] (Giảm {discount}%)")
+                                            else:
+                                                st.markdown(f"**{int(final_price):,}đ**")
+                                        
+                                        with c3:
+                                            # Nút tăng giảm số lượng
+                                            col_minus, col_num, col_plus = st.columns([1, 1, 1])
+                                            if col_minus.button("➖", key=f"dec_{f_id}"):
+                                                new_qty = qty - 1
+                                                httpx.put(f"{GATEWAY_URL}/cart", json={"food_id": f_id, "quantity": new_qty}, headers=headers)
+                                                st.rerun()
+                                                
+                                            col_num.write(f"**SL: {qty}**")
+                                            
+                                            if col_plus.button("➕", key=f"inc_{f_id}"):
+                                                new_qty = qty + 1
+                                                # Lưu ý: Backend Cart Service đang dùng PUT để update, body chỉ cần food_id & quantity
+                                                httpx.put(f"{GATEWAY_URL}/cart", json={"food_id": f_id, "quantity": new_qty}, headers=headers)
+                                                st.rerun()
+                                        
+                                        with c4:
+                                            st.write(f"**{int(item_total):,}đ**")
+                                            if st.button("🗑️", key=f"del_cart_{f_id}"):
+                                                httpx.put(f"{GATEWAY_URL}/cart", json={"food_id": f_id, "quantity": 0}, headers=headers)
+                                                st.rerun()
+
+                            st.divider()
+                            # Phần Tổng tiền & Thanh toán
+                            col_total, col_btn = st.columns([2, 1])
+                            col_total.markdown(f"### Tổng cộng: :red[{int(total_bill):,} đ]")
+                            
+                            with col_btn:
+                                if st.button("🚀 ĐẶT HÀNG NGAY", type="primary", use_container_width=True):
+                                    with st.spinner("Đang xử lý đơn hàng..."):
+                                        try:
+                                            # Gọi API Checkout của Order Service
+                                            checkout_res = httpx.post(f"{GATEWAY_URL}/checkout", headers=headers)
+                                            if checkout_res.status_code == 200:
+                                                order_id = checkout_res.json().get('order_id')
+                                                st.success(f"🎉 Đặt thành công! Mã đơn: #{order_id}")
+                                                st.balloons()
+                                                time.sleep(2)
+                                                # Chuyển qua tab Lịch sử (cần user tự bấm qua hoặc reload)
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Lỗi đặt hàng: {checkout_res.text}")
+                                        except Exception as e:
+                                            st.error(f"Lỗi kết nối: {e}")
+                                            
+                            if st.button("Xóa sạch giỏ hàng"):
+                                httpx.delete(f"{GATEWAY_URL}/cart", headers=headers)
+                                st.rerun()
+                                
+                        else:
+                            st.warning("Không tải được thông tin món ăn từ Server.")
+                else:
+                    st.error("Lỗi tải giỏ hàng (Token hết hạn hoặc lỗi Server)")
+            except Exception as e:
+                st.error(f"Lỗi hiển thị: {e}")

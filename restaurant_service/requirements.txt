@@ -6,3 +6,4 @@ python-jose[cryptography]
 python-multipart
 pymysql
 cryptography
+httpx

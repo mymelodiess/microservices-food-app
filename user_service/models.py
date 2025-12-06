@@ -1,19 +1,38 @@
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy.orm import relationship
 from database import Base
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(255), unique=True, index=True)
-    hashed_password = Column(String(255))
-    role = Column(String(50), default="buyer") # buyer / seller
+    name = Column(String(100))
+    email = Column(String(100), unique=True, index=True)
+    hashed_password = Column(String(200))
     
-    # --- THÔNG TIN MỞ RỘNG CHO BUYER ---
-    full_name = Column(String(255), nullable=True)
-    phone_number = Column(String(20), nullable=True)
-    address = Column(String(255), nullable=True) # Địa chỉ mặc định
+    role = Column(String(20), default="buyer") # buyer / seller
     
-    # --- THÔNG TIN CHO SELLER ---
-    # Người này quản lý chi nhánh nào? (Lưu ID bên restaurant_service)
+    # --- MỚI: Cấp độ của Seller ---
+    # 'owner': Chủ quán (Full quyền)
+    # 'staff': Nhân viên (Chỉ xử lý đơn)
+    seller_mode = Column(String(20), nullable=True) 
+    
     managed_branch_id = Column(Integer, nullable=True)
+    
+    phone = Column(String(20), nullable=True)
+    address = Column(String(255), nullable=True)
+    
+    # Quan hệ sổ địa chỉ
+    addresses = relationship("UserAddress", back_populates="user")
+
+class UserAddress(Base):
+    __tablename__ = "user_addresses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    
+    title = Column(String(50)) 
+    address = Column(String(255))
+    phone = Column(String(20))
+    
+    user = relationship("User", back_populates="addresses")
