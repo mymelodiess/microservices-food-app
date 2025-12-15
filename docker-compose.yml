@@ -1,0 +1,154 @@
+version: '2.4'
+
+services:
+  # --- INFRASTRUCTURE: DATABASE ---
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p123456"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8080:8080"
+
+  # --- INFRASTRUCTURE: KAFKA ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Cấu hình để Kafka hiểu được khi gọi từ nội bộ (9092) và từ bên ngoài (9094)
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # --- MICROSERVICES ---
+  
+  user_service:
+    build: ./user_service
+    container_name: user_service
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+
+  restaurant_service:
+    build: ./restaurant_service
+    container_name: restaurant_service
+    env_file:
+      - .env
+    ports:
+      - "8002:8002"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/static
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+
+  order_service:
+    build: ./order_service
+    container_name: order_service
+    env_file:
+      - .env
+    ports:
+      - "8003:8003"
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+
+  payment_service:
+    build: ./payment_service
+    container_name: payment_service
+    env_file:
+      - .env
+    ports:
+      - "8004:8004"
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8004 --reload
+
+  cart_service:
+    build: ./cart_service
+    container_name: cart_service
+    env_file:
+      - .env
+    ports:
+      - "8005:8005"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+
+  notification_service:
+    build: ./notification_service
+    container_name: notification_service
+    env_file:
+      - .env
+    ports:
+      - "8006:8006"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8006 --reload
+
+  gateway_service:
+    build: ./gateway_service
+    container_name: gateway_service
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      user_service:
+        condition: service_started
+      restaurant_service:
+        condition: service_started
+      order_service:
+        condition: service_started
+      cart_service:
+        condition: service_started
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  mysql_data:

@@ -1,0 +1,23 @@
+/* File: src/index.css - RESET LỖI GIAO DIỆN */
+:root {
+  font-family: 'Poppins', sans-serif, system-ui, Arial; /* Áp dụng font Poppins toàn web */
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 100vw;
+  min-height: 100vh;
+  background-color: #f4f6f8;
+  display: block !important; /* QUAN TRỌNG: Sửa lỗi bị căn giữa */
+}
+
+#root {
+  max-width: 100% !important; /* Cho phép tràn màn hình */
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: left; /* Căn trái mặc định */
+}

@@ -1,0 +1,151 @@
+.register-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: #f0f2f5;
+    padding: 20px;
+}
+
+.register-box {
+    background-color: #ffffff;
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 450px;
+    text-align: center;
+}
+
+.register-box h2 {
+    color: #333;
+    margin-bottom: 30px;
+    font-size: 28px;
+    font-weight: 600;
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.input-group {
+    text-align: left;
+}
+
+.input-field {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: border-color 0.3s;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.input-field:focus {
+    border-color: #007bff;
+}
+
+/* --- CSS cho phần Mật khẩu --- */
+.password-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.password-wrapper .input-field {
+    padding-right: 50px;
+}
+
+.toggle-password-btn {
+    position: absolute;
+    top: 50%;
+    right: 15px;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #888;
+    font-size: 20px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+}
+
+.toggle-password-btn:hover {
+    color: #007bff;
+}
+
+.password-hint {
+    display: block;
+    text-align: left;
+    color: #666;
+    font-size: 13px;
+    margin-top: 8px;
+    font-style: italic;
+}
+
+/* --- Thông báo lỗi --- */
+.error-message {
+    color: #d32f2f;
+    background-color: #fdecea;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    text-align: left;
+    border: 1px solid #f5c6cb;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* --- Nút Đăng ký --- */
+.submit-btn {
+    width: 100%;
+    padding: 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.3s, transform 0.1s;
+}
+
+.submit-btn:hover {
+    background-color: #0056b3;
+}
+
+.submit-btn:active {
+    transform: scale(0.98);
+}
+
+/* --- Link Đăng nhập --- */
+.login-link-text {
+    margin-top: 25px;
+    color: #666;
+    font-size: 15px;
+}
+
+.login-link-text a {
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.login-link-text a:hover {
+    text-decoration: underline;
+}
+
+/* --- Tắt icon con mắt mặc định của trình duyệt --- */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+    display: none !important;
+}
+
+input[type="password"]::-webkit-credentials-auto-fill-button {
+    display: none !important;
+}
