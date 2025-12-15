@@ -57,49 +57,14 @@ async def forward_request(service_url: str, path: str, request: Request):
 # CÁC ROUTES ĐỊNH TUYẾN
 # ==========================================
 
-# 1. AUTHENTICATION (USER SERVICE) - [ĐÃ BỔ SUNG PHẦN NÀY]
-@app.api_route("/login", methods=["POST"])
-async def login(req: Request):
-    return await forward_request(USER_SERVICE_URL, "login", req)
-
-@app.api_route("/register", methods=["POST"])
-async def register(req: Request):
-    return await forward_request(USER_SERVICE_URL, "register", req)
-
-@app.api_route("/verify", methods=["GET"])
-async def verify(req: Request):
-    return await forward_request(USER_SERVICE_URL, "verify", req)
-
-@app.api_route("/users/{path:path}", methods=["GET", "POST", "PUT"])
-async def users_path(path: str, req: Request):
-    return await forward_request(USER_SERVICE_URL, f"users/{path}", req)
-
-# 2. PAYMENT SERVICE
-@app.api_route("/pay", methods=["POST"])
-async def pay(req: Request):
-    return await forward_request(PAYMENT_SERVICE_URL, "pay", req)
-
-@app.api_route("/payment-methods", methods=["GET", "POST"])
-async def payment_methods_root(req: Request):
-    return await forward_request(PAYMENT_SERVICE_URL, "payment-methods", req)
-
-# 3. ORDER SERVICE
-@app.api_route("/checkout", methods=["POST"])
-async def checkout(req: Request):
-    return await forward_request(ORDER_SERVICE_URL, "checkout", req)
-
-@app.api_route("/orders", methods=["GET"])
-async def orders_root(req: Request):
-    return await forward_request(ORDER_SERVICE_URL, "orders", req)
-
-@app.api_route("/orders/{path:path}", methods=["GET", "PUT", "DELETE"])
-async def orders_path(path: str, req: Request):
-    return await forward_request(ORDER_SERVICE_URL, f"orders/{path}", req)
-
-# 4. RESTAURANT SERVICE
+# 1. RESTAURANT SERVICE (Foods, Coupons, Branches, Static)
 @app.api_route("/foods", methods=["GET", "POST"])
 async def foods_root(req: Request):
     return await forward_request(RESTAURANT_SERVICE_URL, "foods", req)
+
+@app.api_route("/foods/search", methods=["GET"])
+async def foods_search(req: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, "foods/search", req)
 
 @app.api_route("/foods/{path:path}", methods=["GET", "PUT", "DELETE"])
 async def foods_path(path: str, req: Request):
@@ -117,12 +82,59 @@ async def branches_path(path: str, req: Request):
 async def coupons_root(req: Request):
     return await forward_request(RESTAURANT_SERVICE_URL, "coupons", req)
 
-# 5. CART SERVICE
+# [QUAN TRỌNG: SỬA LỖI XÓA COUPON TẠI ĐÂY]
+@app.api_route("/coupons/{path:path}", methods=["GET", "PUT", "DELETE"])
+async def coupons_path(path: str, req: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, f"coupons/{path}", req)
+
+@app.api_route("/static/{path:path}", methods=["GET"])
+async def static_files(path: str, req: Request):
+    return await forward_request(RESTAURANT_SERVICE_URL, f"static/{path}", req)
+
+# 2. ORDER SERVICE
+@app.api_route("/checkout", methods=["POST"])
+async def checkout(req: Request):
+    return await forward_request(ORDER_SERVICE_URL, "checkout", req)
+
+@app.api_route("/orders", methods=["GET"])
+async def orders_root(req: Request):
+    return await forward_request(ORDER_SERVICE_URL, "orders", req)
+
+@app.api_route("/orders/{path:path}", methods=["GET", "PUT", "DELETE"])
+async def orders_path(path: str, req: Request):
+    return await forward_request(ORDER_SERVICE_URL, f"orders/{path}", req)
+
+# 3. PAYMENT SERVICE
+@app.api_route("/pay", methods=["POST"])
+async def pay(req: Request):
+    return await forward_request(PAYMENT_SERVICE_URL, "pay", req)
+
+@app.api_route("/payment-methods", methods=["GET", "POST"])
+async def payment_methods(req: Request):
+    return await forward_request(PAYMENT_SERVICE_URL, "payment-methods", req)
+
+# 4. USER & AUTH
+@app.api_route("/login", methods=["POST"])
+async def login(req: Request):
+    return await forward_request(USER_SERVICE_URL, "login", req)
+
+@app.api_route("/register", methods=["POST"])
+async def register(req: Request):
+    return await forward_request(USER_SERVICE_URL, "register", req)
+
+@app.api_route("/verify", methods=["GET"])
+async def verify(req: Request):
+    return await forward_request(USER_SERVICE_URL, "verify", req)
+
+@app.api_route("/users/{path:path}", methods=["GET", "POST", "PUT"])
+async def users_path(path: str, req: Request):
+    return await forward_request(USER_SERVICE_URL, f"users/{path}", req)
+
+# 5. CART & NOTIFICATION
 @app.api_route("/cart", methods=["GET", "POST", "PUT", "DELETE"])
 async def cart_root(req: Request):
     return await forward_request(CART_SERVICE_URL, "cart", req)
 
-# 6. NOTIFICATION
 @app.api_route("/notify", methods=["POST"])
 async def notify(req: Request):
     return await forward_request(NOTIFICATION_SERVICE_URL, "notify", req)

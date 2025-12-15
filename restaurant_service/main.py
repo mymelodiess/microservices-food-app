@@ -269,3 +269,54 @@ async def delete_food(food_id: int, request: Request, db: Session = Depends(get_
     db.delete(item)
     db.commit()
     return {"message": "Deleted"}
+
+# ==========================================
+# API VERIFY COUPON (Cho khách hàng sử dụng)
+# ==========================================
+@app.get("/coupons/verify")
+def verify_coupon(code: str, branch_id: int, db: Session = Depends(get_db)):
+    # 1. Lấy thời gian hiện tại
+    now = datetime.utcnow()
+    
+    # 2. Tìm coupon khớp mã, khớp chi nhánh và còn hạn
+    coupon = db.query(models.Coupon).filter(
+        models.Coupon.code == code,
+        models.Coupon.branch_id == branch_id,
+        models.Coupon.is_active == True,
+        models.Coupon.end_date > now
+    ).first()
+    
+    # 3. Báo lỗi nếu không tìm thấy
+    if not coupon:
+        raise HTTPException(status_code=400, detail="Mã giảm giá không hợp lệ hoặc đã hết hạn")
+    
+    # 4. Trả về thông tin nếu hợp lệ
+    return {
+        "success": True,
+        "discount_percent": coupon.discount_percent,
+        "code": coupon.code,
+        "id": coupon.id
+    }
+
+# ==========================================
+# BỔ SUNG API XÓA COUPON
+# ==========================================
+@app.delete("/coupons/{coupon_id}")
+async def delete_coupon(coupon_id: int, request: Request, db: Session = Depends(get_db)):
+    # 1. Kiểm tra quyền (Seller mới được xóa)
+    # Lưu ý: verify_user trả về dict, cần check role
+    user = await verify_user(request)
+    if user.get('role') != 'seller': 
+        raise HTTPException(403, "Forbidden: Only seller can delete coupons")
+
+    # 2. Tìm coupon trong DB
+    coupon = db.query(models.Coupon).filter(models.Coupon.id == coupon_id).first()
+    if not coupon: 
+        raise HTTPException(404, "Coupon not found")
+    
+    # 3. Thực hiện xóa
+    db.delete(coupon)
+    db.commit()
+    
+    return {"message": "Coupon deleted successfully"}
+

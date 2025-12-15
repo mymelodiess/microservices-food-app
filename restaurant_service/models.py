@@ -41,7 +41,7 @@ class Coupon(Base):
 
     branch = relationship("Branch", back_populates="coupons")
     # Quan hệ với bảng lịch sử dùng
-    usages = relationship("CouponUsage", back_populates="coupon")
+    usages = relationship("CouponUsage", back_populates="coupon", cascade="all, delete-orphan")
 
 # --- BẢNG MỚI: LỊCH SỬ DÙNG MÃ ---
 class CouponUsage(Base):

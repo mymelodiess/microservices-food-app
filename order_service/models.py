@@ -12,8 +12,12 @@ class Order(Base):
     branch_id = Column(Integer)
     
     total_price = Column(Float)
-    status = Column(String(50), default="PENDING") # PENDING_PAYMENT, PAID, SHIPPING, COMPLETED, CANCELLED
+    status = Column(String(50), default="PENDING") 
     
+    # --- THÊM CỘT NÀY ---
+    payment_method = Column(String(20), default="COD") # COD hoặc BANKING
+    # --------------------
+
     customer_name = Column(String(100))
     customer_phone = Column(String(20))
     delivery_address = Column(String(255))
@@ -34,10 +38,9 @@ class OrderItem(Base):
     
     food_id = Column(Integer)
     food_name = Column(String(100))
-    # --- THÊM CỘT NÀY ---
     image_url = Column(String(500), nullable=True)
-    # --------------------
+    
     price = Column(Float)
     quantity = Column(Integer)
-
+    
     order = relationship("Order", back_populates="items")
